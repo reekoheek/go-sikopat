@@ -1,0 +1,7 @@
+name:
+  github.com/reekoheek/go-sikopat
+
+dependencies:
+  - github.com/PuerkitoBio/goquery
+  - gopkg.in/urfave/cli.v2
+
