@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
+	"path/filepath"
 
 	"github.com/reekoheek/go-sikopat/api"
 
@@ -18,12 +20,25 @@ const (
 func main() {
 	log.SetFlags(log.Lshortfile)
 
-	action := newAction(createApi(), TOKEN_FILE)
+	usr, _ := user.Current()
+
+	configDir := os.Getenv("SIKOPAT_DIR")
+	if os.Getenv("SIKOPAT_DIR") == "" && usr != nil {
+		configDir = filepath.Join(usr.HomeDir, ".sikopat")
+	}
+
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			panic("Cannot create config dir at " + configDir)
+		}
+	}
+
+	action := newAction(createApi(configDir), configDir, TOKEN_FILE)
 
 	app := &cli.App{
 		Name:    "go-sikopat",
 		Usage:   "Sikopat cli",
-		Version: "0.1.0",
+		Version: "0.1.1",
 		Commands: []*cli.Command{
 			{
 				Name:   "profile",
@@ -69,6 +84,11 @@ func main() {
 				Usage:  "search items to buy",
 				Action: action.search,
 			},
+			{
+				Name:   "info",
+				Usage:  "application info",
+				Action: action.info,
+			},
 		},
 	}
 
@@ -82,8 +102,8 @@ func handleError(err error) {
 	os.Exit(1)
 }
 
-func createApi() *api.Api {
-	a, err := api.New(BASE_URL, "")
+func createApi(configDir string) *api.Api {
+	a, err := api.New(BASE_URL, configDir, "")
 	if err != nil {
 		handleError(err)
 	}

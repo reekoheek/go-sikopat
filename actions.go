@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/reekoheek/go-sikopat/api"
@@ -129,6 +130,16 @@ func (a *action_t) logout(ctx *cli.Context) error {
 	return os.Remove(a.tokenFile)
 }
 
+func (a *action_t) info(ctx *cli.Context) error {
+	info := a.api.Info(a.token)
+	for k, v := range info {
+		fmt.Printf("%-20s = %s\n", k, v)
+	}
+	fmt.Printf("%-20s = %s\n", "user.file", a.tokenFile)
+
+	return nil
+}
+
 func (a *action_t) persist(token string) error {
 	if a.tokenFile == "" {
 		return nil
@@ -138,14 +149,22 @@ func (a *action_t) persist(token string) error {
 	return ioutil.WriteFile(a.tokenFile, contentBytes, 0644)
 }
 
-func newAction(ap *api.Api, tokenFile string) *action_t {
+func newAction(ap *api.Api, tokenDir string, tokenFile string) *action_t {
 	token := ""
 
-	if tokenFile != "" {
-		content, err := ioutil.ReadFile(tokenFile)
-		if err == nil {
-			token = strings.Trim(string(content), "\r\n\t ")
-		}
+	if tokenDir == "" {
+		tokenDir = "."
+	}
+
+	if tokenFile == "" {
+		tokenFile = TOKEN_FILE
+	}
+
+	tokenFile = filepath.Join(tokenDir, tokenFile)
+
+	content, err := ioutil.ReadFile(tokenFile)
+	if err == nil {
+		token = strings.Trim(string(content), "\r\n\t ")
 	}
 
 	action := &action_t{

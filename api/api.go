@@ -5,12 +5,17 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/satori/go.uuid"
+)
+
+const (
+	VERSION = "0.1.1"
 )
 
 var (
@@ -25,11 +30,21 @@ var (
 type (
 	Api struct {
 		baseUrl      *url.URL
+		dir          string
 		data         *Data
 		commonClient *http.Client
 		clients      map[string]*http.Client
 	}
 )
+
+func (api *Api) Info(token string) map[string]string {
+	infoMap := map[string]string{
+		"api.version": VERSION,
+		"api.url":     api.baseUrl.String(),
+		"api.dir":     api.dir,
+	}
+	return infoMap
+}
 
 func (api *Api) get(client *http.Client, uri string) (*goquery.Document, error) {
 	//log.Println("get", uri)
@@ -337,8 +352,9 @@ func (api *Api) syncCommonData(token string) error {
 	return nil
 }
 
-func New(baseUrl string, dataFile string) (*Api, error) {
+func New(baseUrl string, dataDir string, dataFile string) (*Api, error) {
 	baseUrl = strings.Trim(baseUrl, "\n\r\t ")
+	dataDir = strings.Trim(dataDir, "\n\r\t ")
 	dataFile = strings.Trim(dataFile, "\n\r\t ")
 
 	if baseUrl == "" {
@@ -356,7 +372,8 @@ func New(baseUrl string, dataFile string) (*Api, error) {
 
 	a := &Api{
 		baseUrl: u,
-		data:    NewData(dataFile),
+		dir:     dataDir,
+		data:    NewData(filepath.Join(dataDir, dataFile)),
 		clients: make(map[string]*http.Client),
 	}
 
