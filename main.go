@@ -36,6 +36,25 @@ func main() {
 			//	Action: action.sales,
 			//},
 			{
+				Name:  "buy",
+				Usage: "buy as user",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "force",
+						Aliases: []string{"f"},
+						Value:   false,
+						Usage:   "buy without confirmation",
+					},
+					&cli.IntFlag{
+						Name:    "quantity",
+						Aliases: []string{"n"},
+						Value:   1,
+						Usage:   "number of quantity",
+					},
+				},
+				Action: action.buy,
+			},
+			{
 				Name:   "logout",
 				Usage:  "logout as user",
 				Action: action.logout,
@@ -71,51 +90,3 @@ func createApi() *api.Api {
 
 	return a
 }
-
-//func actionBalance(api *Api, args ...string) error {
-//	var (
-//		err     error
-//		balance int
-//	)
-//
-//	if balance, err = api.Balance(); err != nil {
-//		return err
-//	}
-//	fmt.Printf("Balance: %d\n", balance)
-//
-//	return nil
-//}
-//
-//func actionBuy(api *Api, args ...string) error {
-//	var (
-//		err error
-//	)
-//
-//	log.Println(args)
-//
-//	reader := bufio.NewReader(os.Stdin)
-//	fmt.Print("Enter text: ")
-//	text, _ := reader.ReadString('\n')
-//	fmt.Println(text)
-//
-//	fmt.Println("OK")
-//
-//	return err
-//}
-//
-//func actionList(api *Api, args ...string) error {
-//	var (
-//		products []*Product
-//		err      error
-//	)
-//
-//	if products, err = api.Products(); err != nil {
-//		return err
-//	}
-//
-//	for _, product := range products {
-//		fmt.Printf("%s\n", product.name)
-//	}
-//
-//	return nil
-//}

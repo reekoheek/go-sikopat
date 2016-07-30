@@ -4,4 +4,4 @@ name:
 dependencies:
   - github.com/PuerkitoBio/goquery
   - gopkg.in/urfave/cli.v2
-
+  - github.com/satori/go.uuid

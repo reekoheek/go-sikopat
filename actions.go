@@ -19,31 +19,6 @@ type (
 	}
 )
 
-//func (a *action_t) sales(ctx *cli.Context) error {
-//	var (
-//		sales []*api.Sale
-//		err   error
-//	)
-//
-//	if sales, err = a.api.Sales(a.token); err != nil {
-//		return err
-//	}
-//
-//	for _, sale := range sales {
-//		fmt.Printf(
-//			"%s %-30s %2s %3d %10d %10d\n",
-//			sale.Date,
-//			sale.Product,
-//			sale.Payment,
-//			sale.Qty,
-//			sale.Price,
-//			sale.Total,
-//		)
-//	}
-//
-//	return nil
-//}
-
 func (a *action_t) profile(ctx *cli.Context) error {
 	profile, err := a.api.Profile(a.token, false)
 	if err != nil {
@@ -61,8 +36,49 @@ func (a *action_t) profile(ctx *cli.Context) error {
 	return nil
 }
 
+func (a *action_t) buy(ctx *cli.Context) error {
+	products, err := a.api.Products(a.token, ctx.Args().First())
+	if err != nil {
+		return err
+	}
+
+	found := len(products)
+	if found > 1 {
+		fmt.Printf("There is %d product found to buy\n\n", found)
+		i := 0
+		for _, product := range products {
+			i++
+			fmt.Printf("(%2d) %-20s %4d %7d\n", i, product.Name, product.Qty, product.Price)
+		}
+		fmt.Println("\nBuying aborted, to many product candidates")
+		return nil
+	}
+
+	qty := ctx.Int("quantity")
+
+	var product *api.Product
+	for _, product = range products {
+		break
+	}
+	fmt.Printf("Product:  %-20s %4d %7d\n", product.Name, product.Qty, product.Price)
+	fmt.Printf("Quantity: %d\n", qty)
+
+	if !ctx.Bool("force") {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Print("Are you sure to buy this item (yes|no) ? ")
+		text, _ := reader.ReadString('\n')
+		res := strings.Trim(text, "\n\r\t ")
+		if res != "yes" {
+			fmt.Println("Cancel buying")
+			return nil
+		}
+	}
+
+	return a.api.Buy(a.token, product, qty)
+}
+
 func (a *action_t) search(ctx *cli.Context) error {
-	products, err := a.api.Products(a.token)
+	products, err := a.api.Products(a.token, ctx.Args().First())
 	if err != nil {
 		return err
 	}
@@ -94,7 +110,10 @@ func (a *action_t) login(ctx *cli.Context) error {
 	text, _ = reader.ReadString('\n')
 	password = strings.Trim(text, "\n\r\t ")
 
-	token, err := a.api.Login(username, password)
+	token, err := a.api.Login(&api.Profile{
+		Username: username,
+		Password: password,
+	})
 	if err != nil {
 		return err
 	}

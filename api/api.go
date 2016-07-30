@@ -10,11 +10,16 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/satori/go.uuid"
 )
 
 var (
-	NotLoginErr    = errors.New("Not login yet")
-	LoginFailedErr = errors.New("Login failed")
+	Non200Err       = errors.New("Non 200 Status Code")
+	NotLoginErr     = errors.New("Not login yet")
+	LoginFailedErr  = errors.New("Login failed")
+	QtyPriceRe      = regexp.MustCompile(`^([^ ]+)\s+Pcs\s+Rp\.(\d+)`)
+	BalanceRe       = regexp.MustCompile(`Hutang Anda : Rp.\s+(\d+)`)
+	UrlToFilenameRe = regexp.MustCompile(`[/\:. _]`)
 )
 
 type (
@@ -31,6 +36,10 @@ func (api *Api) get(client *http.Client, uri string) (*goquery.Document, error) 
 	res, err := client.Get(uri)
 	if err != nil {
 		return nil, err
+	}
+
+	if res.StatusCode != 200 {
+		return nil, Non200Err
 	}
 
 	doc, err := goquery.NewDocumentFromResponse(res)
@@ -53,8 +62,35 @@ func (api *Api) createClient() *http.Client {
 }
 
 func (api *Api) getClient(token string) *http.Client {
-	if token != "" && api.clients[token] != nil {
-		return api.clients[token]
+	if token != "" {
+		if api.clients[token] != nil {
+			return api.clients[token]
+		}
+
+		profile := api.data.Profile(token)
+		if profile != nil {
+			client := api.createClient()
+
+			cookie := &http.Cookie{
+				Name:   "BSESS",
+				Value:  profile.RemoteToken,
+				Path:   "/",
+				Domain: api.baseUrl.Host,
+			}
+			client.Jar.SetCookies(api.baseUrl, []*http.Cookie{cookie})
+
+			if _, err := api.get(client, api.baseUrl.String()+"/sales"); err == nil {
+				api.clients[token] = client
+				return client
+			}
+
+			if _, err := api.Login(profile); err == nil {
+				if api.clients[token] != nil {
+					return api.clients[token]
+				}
+			}
+
+		}
 	}
 
 	if api.commonClient == nil {
@@ -80,12 +116,12 @@ func (api *Api) Logout(token string) error {
 	return nil
 }
 
-func (api *Api) Login(username string, password string) (string, error) {
+func (api *Api) Login(profile *Profile) (string, error) {
 	client := api.createClient()
 
 	form := url.Values{
-		"username": {username},
-		"password": {password},
+		"username": {profile.Username},
+		"password": {profile.Password},
 	}
 
 	res, err := client.PostForm(api.baseUrl.String()+"/login", form)
@@ -98,28 +134,61 @@ func (api *Api) Login(username string, password string) (string, error) {
 	}
 
 	cookie := client.Jar.Cookies(api.baseUrl)
-	token := cookie[0].Value
-	api.clients[token] = client
+	remoteToken := cookie[0].Value
 
-	profile := &Profile{
-		Username:    username,
-		Password:    password,
-		Token:       token,
-		RemoteToken: token,
+	if profile.Token == "" {
+		profile.Token = uuid.NewV1().String()
 	}
-	api.data.SetProfile(token, profile)
+	profile.RemoteToken = remoteToken
 
-	_, err = api.Profile(token, true)
-	return token, err
+	api.clients[profile.Token] = client
+	//profile := &Profile{
+	//	Username:    username,
+	//	Password:    password,
+	//	Token:       token,
+	//	RemoteToken: token,
+	//}
+	api.data.SetProfile(profile.Token, profile)
+
+	_, err = api.Profile(profile.Token, true)
+	return profile.Token, err
+}
+
+func (api *Api) Buy(token string, product *Product, qty int) error {
+	client := api.getClient(token)
+	if !api.isUserClient(client) {
+		return NotLoginErr
+	}
+
+	var (
+		method *PaymentMethod
+		err    error
+		qtyStr string
+	)
+
+	if method, err = api.DefaultPaymentMethod(token); err != nil {
+		return err
+	}
+
+	qtyStr = strconv.Itoa(qty)
+
+	form := url.Values{
+		"item":     {product.Id},
+		"payment":  {method.Id},
+		"quantity": {qtyStr},
+	}
+
+	_, err = client.PostForm(api.baseUrl.String()+"/sales/null/create", form)
+	return err
 }
 
 func (api *Api) Profile(token string, force bool) (*Profile, error) {
 	profile := api.data.Profile(token)
-	if profile == nil {
-		return nil, NotLoginErr
-	} else if !force {
-		return profile, nil
-	}
+	//if profile == nil {
+	//	return nil, NotLoginErr
+	//} else if !force {
+	//	return profile, nil
+	//}
 
 	client := api.getClient(token)
 	if !api.isUserClient(client) {
@@ -132,7 +201,7 @@ func (api *Api) Profile(token string, force bool) (*Profile, error) {
 	}
 
 	debt := doc.Find(".hutang").Text()
-	result := regexp.MustCompile("Hutang Anda : Rp.\\s+(\\d+)").FindAllStringSubmatch(debt, -1)
+	result := BalanceRe.FindAllStringSubmatch(debt, -1)
 	balance, _ := strconv.Atoi(result[0][1])
 	profile.Balance = balance
 
@@ -157,15 +226,42 @@ func (api *Api) Profile(token string, force bool) (*Profile, error) {
 	return profile, nil
 }
 
-func (api *Api) Products(token string) ([]*Product, error) {
+func (api *Api) Products(token string, filter string) (map[string]*Product, error) {
+	if err := api.syncCommonData(token); err != nil {
+		return nil, err
+	}
+
+	products := api.data.ProductsByFilter(filter)
+	return products, nil
+}
+
+func (api *Api) DefaultPaymentMethod(token string) (*PaymentMethod, error) {
+	if err := api.syncCommonData(token); err != nil {
+		return nil, err
+	}
+
+	paymentMethod := api.data.DefaultPaymentMethod()
+	return paymentMethod, nil
+}
+
+func (api *Api) PaymentMethods(token string) (map[string]*PaymentMethod, error) {
+	if err := api.syncCommonData(token); err != nil {
+		return nil, err
+	}
+
+	paymentMethods := api.data.PaymentMethods()
+	return paymentMethods, nil
+}
+
+func (api *Api) syncCommonData(token string) error {
 	client := api.getClient(token)
 
 	doc, err := api.get(client, api.baseUrl.String()+"/")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	products := []*Product{}
+	products := map[string]*Product{}
 
 	doc.Find(".imgList").Each(func(i int, s *goquery.Selection) {
 		name := s.Find("strong").Text()
@@ -175,16 +271,17 @@ func (api *Api) Products(token string) ([]*Product, error) {
 		price := 0
 
 		href, exists := s.Find("a").Attr("href")
-		if exists {
-			id = strings.Split(href, "item=")[1]
-
-			sub := s.Find(".subheader").Text()
-			re := regexp.MustCompile(`^([^ ]+)\s+Pcs\s+Rp\.(\d+)`)
-			res := re.FindAllStringSubmatch(sub, -1)
-
-			qty, _ = strconv.Atoi(res[0][1])
-			price, _ = strconv.Atoi(res[0][2])
+		if !exists {
+			return
 		}
+
+		id = strings.Split(href, "item=")[1]
+
+		sub := s.Find(".subheader").Text()
+		res := QtyPriceRe.FindAllStringSubmatch(sub, -1)
+
+		qty, _ = strconv.Atoi(res[0][1])
+		price, _ = strconv.Atoi(res[0][2])
 
 		product := &Product{
 			Id:    id,
@@ -193,91 +290,52 @@ func (api *Api) Products(token string) ([]*Product, error) {
 			Price: price,
 		}
 
-		products = append(products, product)
+		products[id] = product
 	})
 
-	//doc.Find("select[name=item] option").Each(func(i int, s *goquery.Selection) {
-	//	id, _ := s.Attr("value")
-	//	name := strings.Trim(s.Text(), "\n\r\t ")
-	//	if name != "---" {
-	//		product := &Product{
-	//			id:   id,
-	//			name: name,
-	//		}
-	//		products = append(products, product)
-	//	}
-	//})
+	asUser := api.isUserClient(client)
 
-	return products, nil
+	if asUser {
+		doc, err := api.get(client, api.baseUrl.String()+"/sales/null/create")
+		if err == nil {
+			doc.Find("select[name=item] option").Each(func(i int, s *goquery.Selection) {
+				value, _ := s.Attr("value")
+				if value == "" {
+					return
+				}
+				label := strings.Trim(s.Text(), "\n\r\t ")
+				product := products[value]
+				if product != nil {
+					product.Name = label
+				}
+			})
+
+			methods := map[string]*PaymentMethod{}
+
+			doc.Find("select[name=payment] option").Each(func(i int, s *goquery.Selection) {
+				value, _ := s.Attr("value")
+				if value == "" {
+					return
+				}
+
+				label := strings.Trim(s.Text(), "\n\r\t ")
+
+				method := &PaymentMethod{
+					Id:   value,
+					Name: label,
+				}
+
+				methods[value] = method
+			})
+
+			api.data.SetPaymentMethods(methods, asUser)
+		}
+	}
+
+	api.data.SetProducts(products, asUser)
+
+	return nil
 }
-
-//func (a *Api) Connected() bool {
-//	res, err := a.client.Get(a.base + "/sales")
-//	if err != nil {
-//		return false
-//	}
-//
-//	if res.StatusCode == 200 {
-//		return true
-//	}
-//
-//	return false
-//}
-//
-//
-//func (a *Api) Balance() (int, error) {
-//	res, err := a.client.Get(a.base + "/sales")
-//	if err != nil {
-//		return 0, err
-//	}
-//	body, err := ioutil.ReadAll(res.Body)
-//	if err != nil {
-//		return 0, err
-//	}
-//
-//	x := regexp.MustCompile("Hutang Anda : Rp.\\s+(\\d+)<").FindAllStringSubmatch(string(body), -1)
-//
-//	balance, _ := strconv.Atoi(x[0][1])
-//	return balance, nil
-//}
-//
-//func (a *Api) Write() error {
-//	data := a.username + "|" + a.password + "|" + a.token + "\n"
-//	ioutil.WriteFile("sikopat.cfg", []byte(data), 0644)
-//	return nil
-//}
-//
-
-//func (a *Api) Sales(token stringV) ([]*Sale, error) {
-//	res, err := a.client.Get(a.base + "/sales")
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	doc, err := goquery.NewDocumentFromResponse(res)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//sales := []*Sale{}
-//
-//	doc.Find("tbody tr").Each(func(i int, s *goquery.Selection) {
-//		qty, _ := strconv.Atoi(strings.Trim(s.Find("td").Eq(3).Text(), "\n\r\t "))
-//		price, _ := strconv.Atoi(strings.Trim(s.Find("td").Eq(4).Text(), "\n\r\t "))
-//		total, _ := strconv.Atoi(strings.Trim(s.Find("td").Eq(5).Text(), "\n\r\t "))
-//		sale := &Sale{
-//			Product: strings.Trim(s.Find("td").Eq(1).Text(), "\n\r\t "),
-//			Payment: strings.ToUpper(strings.Trim(s.Find("td").Eq(2).Text(), "\n\r\t "))[0:2],
-//			Qty:     qty,
-//			Price:   price,
-//			Total:   total,
-//			Date:    strings.Trim(s.Find("td").Eq(6).Text(), "\n\r\t "),
-//		}
-//		sales = append(sales, sale)
-//	})
-//
-//return sales, nil
-//}
 
 func New(baseUrl string, dataFile string) (*Api, error) {
 	baseUrl = strings.Trim(baseUrl, "\n\r\t ")
@@ -288,7 +346,7 @@ func New(baseUrl string, dataFile string) (*Api, error) {
 	}
 
 	if dataFile == "" {
-		dataFile = regexp.MustCompile(`[/\:. _]`).ReplaceAllString(baseUrl, "-")
+		dataFile = UrlToFilenameRe.ReplaceAllString(baseUrl, "-")
 	}
 
 	u, err := url.Parse(baseUrl)

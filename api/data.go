@@ -3,14 +3,30 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
+	"regexp"
 	"time"
 )
 
 type (
 	Data struct {
-		Profiles map[string]*Profile
+		Profiles      map[string]*Profile
+		Products      map[string]*Product
+		Methods       map[string]*PaymentMethod
+		DefaultMethod string
+		Updated       time.Time
+		file          string
+	}
 
-		file string
+	PaymentMethod struct {
+		Id   string
+		Name string
+	}
+
+	Product struct {
+		Id    string
+		Name  string
+		Qty   int
+		Price int
 	}
 
 	Profile struct {
@@ -22,7 +38,79 @@ type (
 		Sales       []*Sale
 		Updated     time.Time
 	}
+
+	Sale struct {
+		Product string
+		Payment string
+		Qty     int
+		Price   int
+		Total   int
+		Date    string
+	}
 )
+
+func (d *Data) PaymentMethods() map[string]*PaymentMethod {
+	return d.Methods
+}
+
+func (d *Data) DefaultPaymentMethod() *PaymentMethod {
+	if d.DefaultMethod == "" {
+		return nil
+	}
+	return d.Methods[d.DefaultMethod]
+}
+
+func (d *Data) SetPaymentMethods(methods map[string]*PaymentMethod, asUser bool) error {
+	if len(d.Methods) > 0 && !asUser {
+		return nil
+	}
+
+	for _, method := range methods {
+		if method.Name == "Credit" {
+			d.DefaultMethod = method.Id
+			break
+		}
+	}
+
+	d.Methods = methods
+	d.Updated = time.Now()
+
+	return d.persist()
+}
+
+func (d *Data) ProductsByFilter(filter string) map[string]*Product {
+	if len(filter) <= 0 {
+		return d.Products
+	}
+
+	reStr := "(?i)"
+	for _, v := range filter {
+		reStr = reStr + string(v) + ".*"
+	}
+	reStr = reStr[0 : len(reStr)-2]
+	re := regexp.MustCompile(reStr)
+
+	products := make(map[string]*Product)
+
+	for id, product := range d.Products {
+		if re.MatchString(product.Name) {
+			products[id] = product
+		}
+	}
+
+	return products
+}
+
+func (d *Data) SetProducts(products map[string]*Product, asUser bool) error {
+	if len(d.Products) > 0 && !asUser {
+		return nil
+	}
+
+	d.Products = products
+	d.Updated = time.Now()
+
+	return d.persist()
+}
 
 func (d *Data) UnsetProfile(token string) error {
 	delete(d.Profiles, token)
