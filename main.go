@@ -14,7 +14,7 @@ import (
 
 const (
 	TOKEN_FILE = "sikopat.token"
-	BASE_URL   = "http://sikopat.xinix.co.id/index.php"
+	BASE_URL   = "https://sikopat.xinix.co.id/index.php"
 )
 
 func main() {

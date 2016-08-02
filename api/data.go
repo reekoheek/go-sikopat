@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"regexp"
 	"time"
 )
@@ -111,7 +110,7 @@ func NewData(file string) *Data {
 		file:     file,
 	}
 
-	log.Printf("Read data from %s", file)
+	//log.Printf("Read data from %s", file)
 	content, err := ioutil.ReadFile(file)
 	if err == nil {
 		json.Unmarshal(content, data)
