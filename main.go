@@ -33,12 +33,12 @@ func main() {
 		}
 	}
 
-	action := newAction(createApi(configDir), configDir, TOKEN_FILE)
+	action := newAction(createApiImpl(configDir), configDir, TOKEN_FILE)
 
 	app := &cli.App{
 		Name:    "go-sikopat",
 		Usage:   "Sikopat cli",
-		Version: "0.1.1",
+		Version: "0.2.0",
 		Commands: []*cli.Command{
 			{
 				Name:   "profile",
@@ -102,7 +102,7 @@ func handleError(err error) {
 	os.Exit(1)
 }
 
-func createApi(configDir string) *api.Api {
+func createApiImpl(configDir string) *api.ApiImpl {
 	a, err := api.New(BASE_URL, configDir, "")
 	if err != nil {
 		handleError(err)

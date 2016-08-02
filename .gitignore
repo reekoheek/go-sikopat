@@ -1,3 +1,4 @@
 .gopath
 http*
 *.token
+*.aar

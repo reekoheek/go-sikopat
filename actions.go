@@ -14,7 +14,7 @@ import (
 
 type (
 	action_t struct {
-		api       *api.Api
+		api       *api.ApiImpl
 		token     string
 		tokenFile string
 	}
@@ -29,7 +29,7 @@ func (a *action_t) profile(ctx *cli.Context) error {
 	fmt.Printf("Username: %s\n", profile.Username)
 
 	fmt.Println("\nSales:")
-	for _, sale := range profile.Sales {
+	for _, sale := range profile.Sales.Iterator() {
 		fmt.Printf("%-20s %2s %3d %6d %6d %s\n", sale.Product, sale.Payment[:2], sale.Qty, sale.Price, sale.Total, sale.Date)
 	}
 
@@ -43,11 +43,11 @@ func (a *action_t) buy(ctx *cli.Context) error {
 		return err
 	}
 
-	found := len(products)
+	found := products.Len()
 	if found > 1 {
 		fmt.Printf("There is %d product found to buy\n\n", found)
 		i := 0
-		for _, product := range products {
+		for _, product := range products.Iterator() {
 			i++
 			fmt.Printf("(%2d) %-20s %4d %7d\n", i, product.Name, product.Qty, product.Price)
 		}
@@ -58,7 +58,7 @@ func (a *action_t) buy(ctx *cli.Context) error {
 	qty := ctx.Int("quantity")
 
 	var product *api.Product
-	for _, product = range products {
+	for _, product = range products.Iterator() {
 		break
 	}
 	fmt.Printf("Product:  %-20s %4d %7d\n", product.Name, product.Qty, product.Price)
@@ -84,7 +84,7 @@ func (a *action_t) search(ctx *cli.Context) error {
 		return err
 	}
 
-	for _, product := range products {
+	for _, product := range products.Iterator() {
 		if product.Id != "" {
 			fmt.Printf("%-30s %-20s %5d %20d\n", product.Id, product.Name, product.Qty, product.Price)
 		}
@@ -111,10 +111,7 @@ func (a *action_t) login(ctx *cli.Context) error {
 	text, _ = reader.ReadString('\n')
 	password = strings.Trim(text, "\n\r\t ")
 
-	token, err := a.api.Login(&api.Profile{
-		Username: username,
-		Password: password,
-	})
+	token, err := a.api.Login(api.NewProfile(username, password))
 	if err != nil {
 		return err
 	}
@@ -132,9 +129,9 @@ func (a *action_t) logout(ctx *cli.Context) error {
 
 func (a *action_t) info(ctx *cli.Context) error {
 	info := a.api.Info(a.token)
-	for k, v := range info {
+	info.ForEach(func(k string, v string) {
 		fmt.Printf("%-20s = %s\n", k, v)
-	}
+	})
 	fmt.Printf("%-20s = %s\n", "user.file", a.tokenFile)
 
 	return nil
@@ -149,7 +146,7 @@ func (a *action_t) persist(token string) error {
 	return ioutil.WriteFile(a.tokenFile, contentBytes, 0644)
 }
 
-func newAction(ap *api.Api, tokenDir string, tokenFile string) *action_t {
+func newAction(ap *api.ApiImpl, tokenDir string, tokenFile string) *action_t {
 	token := ""
 
 	if tokenDir == "" {

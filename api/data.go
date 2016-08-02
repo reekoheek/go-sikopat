@@ -3,53 +3,23 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"regexp"
 	"time"
 )
 
 type (
 	Data struct {
-		Profiles      map[string]*Profile
-		Products      map[string]*Product
-		Methods       map[string]*PaymentMethod
+		Profiles      *Profiles
+		Products      *Products
+		Methods       *PaymentMethods
 		DefaultMethod string
 		Updated       time.Time
 		file          string
 	}
-
-	PaymentMethod struct {
-		Id   string
-		Name string
-	}
-
-	Product struct {
-		Id    string
-		Name  string
-		Qty   int
-		Price int
-	}
-
-	Profile struct {
-		Token       string
-		Username    string
-		Password    string
-		RemoteToken string
-		Balance     int
-		Sales       []*Sale
-		Updated     time.Time
-	}
-
-	Sale struct {
-		Product string
-		Payment string
-		Qty     int
-		Price   int
-		Total   int
-		Date    string
-	}
 )
 
-func (d *Data) PaymentMethods() map[string]*PaymentMethod {
+func (d *Data) PaymentMethods() *PaymentMethods {
 	return d.Methods
 }
 
@@ -57,19 +27,18 @@ func (d *Data) DefaultPaymentMethod() *PaymentMethod {
 	if d.DefaultMethod == "" {
 		return nil
 	}
-	return d.Methods[d.DefaultMethod]
+	return d.Methods.Get(d.DefaultMethod)
 }
 
-func (d *Data) SetPaymentMethods(methods map[string]*PaymentMethod, asUser bool) error {
-	if len(d.Methods) > 0 && !asUser {
+func (d *Data) SetPaymentMethods(methods *PaymentMethods, asUser bool) error {
+	if (d.Methods != nil && d.Methods.Len() > 0) && !asUser {
 		return nil
 	}
 
-	for _, method := range methods {
-		if method.Name == "Credit" {
-			d.DefaultMethod = method.Id
-			break
-		}
+	if foundMethod := methods.Find(func(k string, method *PaymentMethod) bool {
+		return method.Name == "Credit"
+	}); foundMethod != nil {
+		d.DefaultMethod = foundMethod.Id
 	}
 
 	d.Methods = methods
@@ -78,7 +47,7 @@ func (d *Data) SetPaymentMethods(methods map[string]*PaymentMethod, asUser bool)
 	return d.persist()
 }
 
-func (d *Data) ProductsByFilter(filter string) map[string]*Product {
+func (d *Data) ProductsByFilter(filter string) *Products {
 	if len(filter) <= 0 {
 		return d.Products
 	}
@@ -90,19 +59,19 @@ func (d *Data) ProductsByFilter(filter string) map[string]*Product {
 	reStr = reStr[0 : len(reStr)-2]
 	re := regexp.MustCompile(reStr)
 
-	products := make(map[string]*Product)
+	products := NewProducts()
 
-	for id, product := range d.Products {
+	for id, product := range d.Products.Iterator() {
 		if re.MatchString(product.Name) {
-			products[id] = product
+			products.Put(id, product)
 		}
 	}
 
 	return products
 }
 
-func (d *Data) SetProducts(products map[string]*Product, asUser bool) error {
-	if len(d.Products) > 0 && !asUser {
+func (d *Data) SetProducts(products *Products, asUser bool) error {
+	if (d.Products != nil && d.Products.Len() > 0) && !asUser {
 		return nil
 	}
 
@@ -113,24 +82,21 @@ func (d *Data) SetProducts(products map[string]*Product, asUser bool) error {
 }
 
 func (d *Data) UnsetProfile(token string) error {
-	delete(d.Profiles, token)
+	d.Profiles.Delete(token)
 
 	return d.persist()
 }
 
 func (d *Data) SetProfile(token string, profile *Profile) error {
-	if profile.Sales == nil {
-		profile.Sales = make([]*Sale, 0)
-	}
 	profile.Updated = time.Now()
 
-	d.Profiles[token] = profile
+	d.Profiles.Put(token, profile)
 
 	return d.persist()
 }
 
 func (d *Data) Profile(token string) *Profile {
-	return d.Profiles[token]
+	return d.Profiles.Get(token)
 }
 
 func (d *Data) persist() error {
@@ -141,36 +107,15 @@ func (d *Data) persist() error {
 
 func NewData(file string) *Data {
 	data := &Data{
-		Profiles: make(map[string]*Profile),
+		Profiles: NewProfiles(),
 		file:     file,
 	}
 
+	log.Printf("Read data from %s", file)
 	content, err := ioutil.ReadFile(file)
 	if err == nil {
 		json.Unmarshal(content, data)
 	}
 
 	return data
-	//
-	//	tokens := strings.Split(strings.Trim(string(data), "\n\r\t "), "|")
-	//	a.username = tokens[0]
-	//	a.password = tokens[1]
-	//	a.token = tokens[2]
-	//
-	//	u, err := url.Parse(a.base)
-	//	if err != nil {
-	//		return err
-	//	}
-	//
-	//	cookie := &http.Cookie{
-	//		Name:   "BSESS",
-	//		Value:  a.token,
-	//		Path:   "/",
-	//		Domain: "sikopat.xinix.co.id",
-	//	}
-	//	cookies := []*http.Cookie{cookie}
-	//
-	//	a.client.Jar.SetCookies(u, cookies)
-	//
-	return nil
 }

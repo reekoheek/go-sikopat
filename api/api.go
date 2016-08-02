@@ -28,7 +28,7 @@ var (
 )
 
 type (
-	Api struct {
+	ApiImpl struct {
 		baseUrl      *url.URL
 		dir          string
 		data         *Data
@@ -37,16 +37,17 @@ type (
 	}
 )
 
-func (api *Api) Info(token string) map[string]string {
-	infoMap := map[string]string{
-		"api.version": VERSION,
-		"api.url":     api.baseUrl.String(),
-		"api.dir":     api.dir,
-	}
+func (api *ApiImpl) Info(token string) *Info {
+	infoMap := NewInfo()
+
+	infoMap.Put("api.version", VERSION)
+	infoMap.Put("api.url", api.baseUrl.String())
+	infoMap.Put("api.dir", api.dir)
+
 	return infoMap
 }
 
-func (api *Api) get(client *http.Client, uri string) (*goquery.Document, error) {
+func (api *ApiImpl) get(client *http.Client, uri string) (*goquery.Document, error) {
 	//log.Println("get", uri)
 	res, err := client.Get(uri)
 	if err != nil {
@@ -65,7 +66,7 @@ func (api *Api) get(client *http.Client, uri string) (*goquery.Document, error) 
 	return doc, nil
 }
 
-func (api *Api) createClient() *http.Client {
+func (api *ApiImpl) createClient() *http.Client {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		panic("Error on create new cookie jar")
@@ -76,7 +77,7 @@ func (api *Api) createClient() *http.Client {
 	}
 }
 
-func (api *Api) getClient(token string) *http.Client {
+func (api *ApiImpl) getClient(token string) *http.Client {
 	if token != "" {
 		if api.clients[token] != nil {
 			return api.clients[token]
@@ -115,11 +116,11 @@ func (api *Api) getClient(token string) *http.Client {
 	return api.commonClient
 }
 
-func (api *Api) isUserClient(client *http.Client) bool {
+func (api *ApiImpl) isUserClient(client *http.Client) bool {
 	return len(client.Jar.Cookies(api.baseUrl)) != 0
 }
 
-func (api *Api) Logout(token string) error {
+func (api *ApiImpl) Logout(token string) error {
 	client := api.getClient(token)
 	if api.isUserClient(client) {
 		api.get(client, api.baseUrl.String()+"/logout")
@@ -131,7 +132,7 @@ func (api *Api) Logout(token string) error {
 	return nil
 }
 
-func (api *Api) Login(profile *Profile) (string, error) {
+func (api *ApiImpl) Login(profile *Profile) (string, error) {
 	client := api.createClient()
 
 	form := url.Values{
@@ -157,19 +158,14 @@ func (api *Api) Login(profile *Profile) (string, error) {
 	profile.RemoteToken = remoteToken
 
 	api.clients[profile.Token] = client
-	//profile := &Profile{
-	//	Username:    username,
-	//	Password:    password,
-	//	Token:       token,
-	//	RemoteToken: token,
-	//}
+
 	api.data.SetProfile(profile.Token, profile)
 
 	_, err = api.Profile(profile.Token, true)
 	return profile.Token, err
 }
 
-func (api *Api) Buy(token string, product *Product, qty int) error {
+func (api *ApiImpl) Buy(token string, product *Product, qty int) error {
 	client := api.getClient(token)
 	if !api.isUserClient(client) {
 		return NotLoginErr
@@ -197,7 +193,7 @@ func (api *Api) Buy(token string, product *Product, qty int) error {
 	return err
 }
 
-func (api *Api) Profile(token string, force bool) (*Profile, error) {
+func (api *ApiImpl) Profile(token string, force bool) (*Profile, error) {
 	profile := api.data.Profile(token)
 	//if profile == nil {
 	//	return nil, NotLoginErr
@@ -220,7 +216,7 @@ func (api *Api) Profile(token string, force bool) (*Profile, error) {
 	balance, _ := strconv.Atoi(result[0][1])
 	profile.Balance = balance
 
-	sales := make([]*Sale, 0)
+	sales := NewSales()
 	doc.Find("tbody tr").Each(func(i int, s *goquery.Selection) {
 		qty, _ := strconv.Atoi(strings.Trim(s.Find("td").Eq(3).Text(), "\r\n\t "))
 		price, _ := strconv.Atoi(strings.Trim(s.Find("td").Eq(4).Text(), "\r\n\t "))
@@ -233,7 +229,7 @@ func (api *Api) Profile(token string, force bool) (*Profile, error) {
 			Total:   total,
 			Date:    strings.Trim(s.Find("td").Eq(6).Text(), "\r\n\t "),
 		}
-		sales = append(sales, sale)
+		sales.Add(sale)
 	})
 	profile.Sales = sales
 
@@ -241,7 +237,7 @@ func (api *Api) Profile(token string, force bool) (*Profile, error) {
 	return profile, nil
 }
 
-func (api *Api) Products(token string, filter string) (map[string]*Product, error) {
+func (api *ApiImpl) Products(token string, filter string) (*Products, error) {
 	if err := api.syncCommonData(token); err != nil {
 		return nil, err
 	}
@@ -250,7 +246,7 @@ func (api *Api) Products(token string, filter string) (map[string]*Product, erro
 	return products, nil
 }
 
-func (api *Api) DefaultPaymentMethod(token string) (*PaymentMethod, error) {
+func (api *ApiImpl) DefaultPaymentMethod(token string) (*PaymentMethod, error) {
 	if err := api.syncCommonData(token); err != nil {
 		return nil, err
 	}
@@ -259,7 +255,7 @@ func (api *Api) DefaultPaymentMethod(token string) (*PaymentMethod, error) {
 	return paymentMethod, nil
 }
 
-func (api *Api) PaymentMethods(token string) (map[string]*PaymentMethod, error) {
+func (api *ApiImpl) PaymentMethods(token string) (*PaymentMethods, error) {
 	if err := api.syncCommonData(token); err != nil {
 		return nil, err
 	}
@@ -268,7 +264,7 @@ func (api *Api) PaymentMethods(token string) (map[string]*PaymentMethod, error) 
 	return paymentMethods, nil
 }
 
-func (api *Api) syncCommonData(token string) error {
+func (api *ApiImpl) syncCommonData(token string) error {
 	client := api.getClient(token)
 
 	doc, err := api.get(client, api.baseUrl.String()+"/")
@@ -276,7 +272,7 @@ func (api *Api) syncCommonData(token string) error {
 		return err
 	}
 
-	products := map[string]*Product{}
+	products := NewProducts()
 
 	doc.Find(".imgList").Each(func(i int, s *goquery.Selection) {
 		name := s.Find("strong").Text()
@@ -305,7 +301,7 @@ func (api *Api) syncCommonData(token string) error {
 			Price: price,
 		}
 
-		products[id] = product
+		products.Put(id, product)
 	})
 
 	asUser := api.isUserClient(client)
@@ -319,13 +315,13 @@ func (api *Api) syncCommonData(token string) error {
 					return
 				}
 				label := strings.Trim(s.Text(), "\n\r\t ")
-				product := products[value]
+				product := products.Get(value)
 				if product != nil {
 					product.Name = label
 				}
 			})
 
-			methods := map[string]*PaymentMethod{}
+			methods := NewPaymentMethods()
 
 			doc.Find("select[name=payment] option").Each(func(i int, s *goquery.Selection) {
 				value, _ := s.Attr("value")
@@ -340,7 +336,7 @@ func (api *Api) syncCommonData(token string) error {
 					Name: label,
 				}
 
-				methods[value] = method
+				methods.Put(value, method)
 			})
 
 			api.data.SetPaymentMethods(methods, asUser)
@@ -352,7 +348,7 @@ func (api *Api) syncCommonData(token string) error {
 	return nil
 }
 
-func New(baseUrl string, dataDir string, dataFile string) (*Api, error) {
+func New(baseUrl string, dataDir string, dataFile string) (*ApiImpl, error) {
 	baseUrl = strings.Trim(baseUrl, "\n\r\t ")
 	dataDir = strings.Trim(dataDir, "\n\r\t ")
 	dataFile = strings.Trim(dataFile, "\n\r\t ")
@@ -370,7 +366,9 @@ func New(baseUrl string, dataDir string, dataFile string) (*Api, error) {
 		return nil, err
 	}
 
-	a := &Api{
+	dataDir, _ = filepath.Abs(dataDir)
+
+	a := &ApiImpl{
 		baseUrl: u,
 		dir:     dataDir,
 		data:    NewData(filepath.Join(dataDir, dataFile)),
